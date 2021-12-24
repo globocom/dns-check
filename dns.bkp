@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# 
+globo=0
+gcp=0
+
+function cleanup(){
+		tput cnorm
+}
+
+trap cleanup EXIT
+
+tput civis
+#### Lidando com cursos
+echo -e '\033[6n' ; read -sd R CURPOS
+CURPOS=${CURPOS#*[}
+linha_globo=$(expr $(echo $CURPOS|cut -d";" -f1) - 1)
+coluna_globo=$(expr $(echo $CURPOS|cut -d";" -f2) - 1)
+linha_gcp=$(expr $linha_globo + 1)
+coluna_gcp=coluna_globo
+linha_final=$(expr 1 + $(echo $CURPOS|cut -d";" -f1))
+coluna_final=$coluna_globo
+##############
+
+#### Print inicial
+tput cup $linha_globo $coluna_globo
+echo Globo: 0
+tput cup $linha_gcp $coluna_gcp
+echo GCP: 0
+##############
+
+#### Bloco principal
+for run in $(seq 1 100);do
+		result=$(host s3.aws.cloud.globo|awk '{print $NF}')
+	if [ $result == "186.192.90.3" ];then
+		globo=$(expr $globo + 1)
+        tput cup $linha_globo $coluna_globo
+		echo "Globo: $globo"
+	elif [ $result == "34.149.183.254" ];then
+		gcp=$(expr $gcp + 1)
+        tput cup $linha_gcp $coluna_gcp
+		echo "GCP: $gcp"
+	fi
+done
+tput cup $linha_final $coluna_final
+##################
