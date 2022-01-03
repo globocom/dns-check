@@ -8,15 +8,12 @@ import (
 	"net"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 )
 
-//Global varialbes
-var result = make(map[string]int)
+// Global variables
 var wg sync.WaitGroup
-var mutex = &sync.RWMutex{}
 var DefaultResolver = net.Resolver{PreferGo: true}
 
 // printProgressBar prints a friendly progress bar so the user can be sure if the program is running or waiting
@@ -35,7 +32,7 @@ func printProgressBar(iteration, total int, prefix, suffix string, length int, f
 	}
 }
 
-//LookupIP is a replacemente for default LookupIP so we can use go as dns resolver instead of the OS
+// LookupIP is a replacement for default LookupIP so we can use go as dns resolver instead of the OS
 func LookupIP(host string) ([]net.IP, error) {
 	addrs, err := DefaultResolver.LookupIPAddr(context.Background(), host)
 	if err != nil {
@@ -48,66 +45,79 @@ func LookupIP(host string) ([]net.IP, error) {
 	return ips, nil
 }
 
-func getHealthcheck() {
-	//defer wg.Done()
-	resp, err := http.Get("https://s3.glbimg.com/healthcheck")
-	statusCode := strconv.Itoa(resp.StatusCode)
-	mutex.Lock()
-	result[statusCode]++
-	mutex.Unlock()
-
+func getHealthcheck(ch chan<- string) {
+	defer wg.Done()
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", "https://s3.glbimg.com/healthcheck", nil)
+	req.Header.Set("Connection", "close")
+	res, err := client.Do(req)
 	if err != nil {
 		log.Fatalln(err)
 	}
-
+	defer res.Body.Close()
+	ch <- string(res.StatusCode)
 }
 
 // dnsResolver resolves a dns add the result to a map and has concurrency control
-func dnsResolver(domain string) {
-	//defer wg.Done()
+func dnsResolver(domain string, ch chan<- string) {
+	defer wg.Done()
 	iprecords, _ := LookupIP(domain)
 	for _, ip := range iprecords {
-		mutex.Lock()
-		result[ip.String()]++
-		mutex.Unlock()
+		ch <- ip.String()
 	}
 }
+
 func main() {
+	var (
+		ch = make(chan string)
+		result = make(map[string]int)
+		setWait bool
+	)
+
 	domainPtr := flag.String("domain", "", "`Domain` to be resolved")
 	repeatPtr := flag.Int("r", 1, "`Number` of run times")
 	multithread := flag.Bool("d", false, "Enables multithread. Default is false.")
 	action := flag.String("action", "", "dns or get")
 
-	var setWait bool
 	flag.Parse()
 	fmt.Println("domain:", *domainPtr)
+
 	for rep := 1; rep <= *repeatPtr; rep++ {
 		printProgressBar(rep, *repeatPtr, "Progress", "Complete", 25, "=")
 		if *multithread {
 			setWait = true
-			//go func() {
-			defer wg.Done()
 			wg.Add(1)
 			if *action == "dns" {
-				go dnsResolver(*domainPtr)
+				go dnsResolver(*domainPtr, ch)
 			} else {
-				go getHealthcheck()
+				go getHealthcheck(ch)
 			}
 		} else {
 			if *action == "dns" {
-				dnsResolver(*domainPtr)
+				dnsResolver(*domainPtr, ch)
 			} else {
-				getHealthcheck()
+				getHealthcheck(ch)
 			}
 		}
 	}
-	if setWait == true {
-		wg.Wait()
+
+	go func() {
+		if setWait == true {
+			wg.Wait()
+		}
+		close(ch)
+	}()
+
+	for res := range ch {
+		result[res]++
 	}
+
 	allkeys := make([]string, 0, len(result))
+	
 	for key := range result {
 		allkeys = append(allkeys, key)
 	}
+	
 	sort.Strings(allkeys)
 
 	for _, key := range allkeys {
