@@ -4,8 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net"
+	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -45,9 +48,23 @@ func LookupIP(host string) ([]net.IP, error) {
 	return ips, nil
 }
 
+func getHealthcheck() {
+	//defer wg.Done()
+	resp, err := http.Get("https://s3.glbimg.com/healthcheck")
+	statusCode := strconv.Itoa(resp.StatusCode)
+	mutex.Lock()
+	result[statusCode]++
+	mutex.Unlock()
+
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+}
+
 // dnsResolver resolves a dns add the result to a map and has concurrency control
 func dnsResolver(domain string) {
-	wg.Add(1)
+	//defer wg.Done()
 	iprecords, _ := LookupIP(domain)
 	for _, ip := range iprecords {
 		mutex.Lock()
@@ -59,6 +76,8 @@ func main() {
 	domainPtr := flag.String("domain", "", "`Domain` to be resolved")
 	repeatPtr := flag.Int("r", 1, "`Number` of run times")
 	multithread := flag.Bool("d", false, "Enables multithread. Default is false.")
+	action := flag.String("action", "", "dns or get")
+
 	var setWait bool
 	flag.Parse()
 	fmt.Println("domain:", *domainPtr)
@@ -66,12 +85,20 @@ func main() {
 		printProgressBar(rep, *repeatPtr, "Progress", "Complete", 25, "=")
 		if *multithread {
 			setWait = true
-			go func() {
-				defer wg.Done()
-				dnsResolver(*domainPtr)
-			}()
+			//go func() {
+			defer wg.Done()
+			wg.Add(1)
+			if *action == "dns" {
+				go dnsResolver(*domainPtr)
+			} else {
+				go getHealthcheck()
+			}
 		} else {
-			dnsResolver(*domainPtr)
+			if *action == "dns" {
+				dnsResolver(*domainPtr)
+			} else {
+				getHealthcheck()
+			}
 		}
 	}
 	if setWait == true {
