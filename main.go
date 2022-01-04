@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -45,17 +46,17 @@ func LookupIP(host string) ([]net.IP, error) {
 	return ips, nil
 }
 
-func getHealthcheck(ch chan<- string) {
+func getHealthcheck(url string, ch chan<- string) {
 	defer wg.Done()
 	client := &http.Client{}
-	req, _ := http.NewRequest("GET", "https://s3.glbimg.com/healthcheck", nil)
+	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Connection", "close")
 	res, err := client.Do(req)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	defer res.Body.Close()
-	ch <- string(res.StatusCode)
+	ch <- strconv.Itoa(res.StatusCode)
 }
 
 // dnsResolver resolves a dns add the result to a map and has concurrency control
@@ -78,9 +79,15 @@ func main() {
 	repeatPtr := flag.Int("r", 1, "`Number` of run times")
 	multithread := flag.Bool("d", false, "Enables multithread. Default is false.")
 	action := flag.String("action", "", "dns or get")
+	url := flag.String("url", "https://s3.glbimg.com/healthcheck", "GET Url")
 
 	flag.Parse()
-	fmt.Println("domain:", *domainPtr)
+	if *domainPtr != "" {
+		fmt.Println("Domain: ", *domainPtr)
+	}
+	if *action != "dns" {
+		fmt.Println("Url: ", *url)
+	}
 
 	for rep := 1; rep <= *repeatPtr; rep++ {
 		printProgressBar(rep, *repeatPtr, "Progress", "Complete", 25, "=")
@@ -90,13 +97,13 @@ func main() {
 			if *action == "dns" {
 				go dnsResolver(*domainPtr, ch)
 			} else {
-				go getHealthcheck(ch)
+				go getHealthcheck(*url, ch)
 			}
 		} else {
 			if *action == "dns" {
 				dnsResolver(*domainPtr, ch)
 			} else {
-				getHealthcheck(ch)
+				getHealthcheck(*url, ch)
 			}
 		}
 	}
